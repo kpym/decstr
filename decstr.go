@@ -1,21 +1,29 @@
-// docstr is a package to detect and convert decimal strings.
+// decstr is a package for detecting and converting decimal strings.
+// It provides utilities for identifying decimal formats and converting between them.
 package decstr
 
 import (
 	"strings"
 )
 
-// NoSeparator is a constant for no separator.
-const NoSeparator rune = -1
+// NoSeparator represents the absence of a separator and is the 0 rune.
+const NoSeparator = rune(0)
 
+// DecimalFormat describes the format of a decimal string.
+//   - Point: The decimal separator (or NoSeparator if absent).
+//   - Group: The grouping separator (or NoSeparator if absent).
+//   - Standard: True if grouping follows a standard pattern (e.g., groups of 3 digits),
+//     False if it uses a non-standard pattern (e.g., 3 digits then 2 digits).
 type DecimalFormat struct {
-	Point    rune // Decimal separator, if -1 then no decimal separator
-	Group    rune // Grouping separator, if -1 then no grouping separator
-	Standard bool // true if grouping is by 3, false if it's non-standard (e.g., 3 then by 2)
+	Point    rune
+	Group    rune
+	Standard bool
 }
 
-// String returns a string representation (like {`,`, ` `, standard}) for DecimalFormat.
+// String returns a string representation of the DecimalFormat,
+// formatted as {`<Point>`, `<Group>`, <standard|non-standard>}.
 func (df DecimalFormat) String() string {
+	// sep converts a rune to its string representation or "<none>" if NoSeparator.
 	sep := func(r rune) string {
 		if r == NoSeparator {
 			return "<none>"
@@ -29,7 +37,8 @@ func (df DecimalFormat) String() string {
 	return "{`" + sep(df.Point) + "`, `" + sep(df.Group) + "`, " + std + "}"
 }
 
-// possibleGrouping is a map of possible grouping separators for each decimal separator.
+// possibleGrouping maps each decimal separator to its valid grouping separators.
+// For example, ',' as a decimal separator may use ' ', '.', or '\” as grouping separators.
 var possibleGrouping = map[rune][]rune{
 	',':  {' ', '.', '\''},
 	'.':  {' ', ',', '\''},
@@ -37,7 +46,7 @@ var possibleGrouping = map[rune][]rune{
 	'\'': {'.'},
 }
 
-// isPossible returns true if the grouping separator is possible for the decimal separator.
+// isPossible checks if the given grouping separator is valid for the specified decimal separator.
 func isPossible(point, group rune) bool {
 	groups, ok := possibleGrouping[point]
 	if !ok {
@@ -51,28 +60,106 @@ func isPossible(point, group rune) bool {
 	return false
 }
 
-// getSign returns the sign and the absolute value of a decimal string.
-// The sign is an empty string for positive numbers and a '-' for negative numbers.
-func getSign(decimal string) (sign string, abs string) {
-	abs = strings.TrimSpace(decimal)
+// bytestr is a type constraint for []byte and string, used for functions
+// that operate generically on these types.
+type bytestr interface {
+	~[]byte | ~string
+}
+
+// trimLeft removes all leading occurrences of the specified character from the given byte slice or string.
+func trimLeft[T bytestr](decimal T, c byte) T {
+	var i int
+	for i = 0; i < len(decimal); i++ {
+		if decimal[i] != c {
+			break
+		}
+	}
+	return decimal[i:]
+}
+
+// trimRight removes all trailing occurrences of the specified character from the given byte slice or string.
+func trimRight[T bytestr](decimal T, c byte) T {
+	var i int
+	for i = len(decimal) - 1; i >= 0; i-- {
+		if decimal[i] != c {
+			break
+		}
+	}
+	return decimal[:i+1]
+}
+
+// trimSpace removes leading and trailing spaces from the given byte slice or string.
+func trimSpace[T bytestr](decimal T) T {
+	return trimRight(trimLeft(decimal, ' '), ' ')
+}
+
+// getSign extracts the sign and the absolute value of a decimal string.
+// - decimal: The input decimal string or byte slice (may include leading/trailing spaces).
+// - Returns:
+//   - sign: An empty string for positive numbers, or a "-" for negative numbers.
+//   - abs: The absolute value of the input (without the sign or leading spaces).
+//
+// If the input is empty or contains only spaces, both sign and abs are empty.
+// Example:
+//
+//	getSign("-123") => "-", "123"
+//	getSign("+123") => "", "123"
+//	getSign("  123") => "", "123"
+//	getSign("   ") => "", ""
+func getSign[T bytestr](decimal T) (sign T, abs T) {
+	abs = trimSpace(decimal)
 	if len(abs) == 0 {
-		return "", ""
+		return abs, abs
 	}
 	switch abs[0] {
-	case '-':
-		return "-", strings.TrimLeft(abs[1:], " ")
-	case '+':
-		return "", strings.TrimLeft(abs[1:], " ")
-	default:
-		return "", abs
+	case '-': // Negative sign detected; trim it and return.
+		return abs[:1], trimLeft(abs[1:], ' ')
+	case '+': // Positive sign detected; trim it and return.
+		return abs[:0], trimLeft(abs[1:], ' ')
+	default: // No sign detected; return the absolute value.
+		return abs[:0], abs
 	}
 }
 
-// DetectFormat detects the decimal format of a string.
-// It returns the DecimalFormat and a boolean indicating if the format was detected.
-// ok is false because the string do not contain a decimal or because the format is ambiguous.
-// If we can't detect if it is a standard or non-standard grouping, we assume it is standard.
-func DetectFormat(decimal string) (df DecimalFormat, ok bool) {
+// flushAtoB appends the contents of b to a and resets b to an empty slice.
+func flushBtoA(a, b *[]byte) {
+	if len(*b) > 0 {
+		*a = append(*a, *b...)
+		*b = (*b)[:0]
+	}
+}
+
+// compose returns the normalized decimal string from the integer and decimal parts.
+func compose(a, b []byte) []byte {
+	a = trimLeft(a, '0')
+	if len(a) == 0 {
+		a = append(a, '0')
+	}
+	b = trimRight(b, '0')
+	if len(b) == 0 {
+		return a
+	}
+	a = append(a, '.')
+	a = append(a, b...)
+	return a
+}
+
+// detectAndNormalize detects the format of a decimal string and returns a normalized version of it.
+// - decimal: The input decimal string or byte slice to process.
+// - Returns:
+//   - normalized: The normalized decimal string (with grouping separators removed and decimal part normalized).
+//   - df: The detected decimal format (point, grouping, and whether grouping is standard or not).
+//   - ok: A boolean indicating if the detection and normalization succeeded.
+//
+// The function supports various separators, such as ',', '.', '\”, and the midpoint '·'.
+// Whitespace, non-standard grouping, and invalid formats are handled gracefully.
+// Examples:
+//
+//	"1,234.56" -> "1234.56", {Point: '.', Group: ',', Standard: true}, true
+//	"123.45"   -> "123.45", {Point: '.', Group: NoSeparator, Standard: true}, true
+//	"123 45"   -> "", {}, false
+//	""         -> "", {}, false
+func detectAndNormalize[T bytestr](decimal T) (normalized T, df DecimalFormat, ok bool) {
 	// temporary variables
 	var (
 		first        rune // first separator found
@@ -81,267 +168,270 @@ func DetectFormat(decimal string) (df DecimalFormat, ok bool) {
 		mode         int  // 0: unknown, 2: non-standard grouping, 3: standard grouping
 		hasDigit     bool // if we have at least one digit
 	)
-	_, decimal = getSign(decimal)
+	a := make([]byte, 0, len(decimal)) // the integer part (before the decimal separator)
+	b := make([]byte, 0, len(decimal)) // the decimal part (after the decimal separator)
+	buf := &a                          // the current buffer (a or b)
+	sign, abs := getSign(decimal)
+	*buf = append(*buf, sign...)
 	// loop over the bytes of the string
-	for i := 0; i < len(decimal); i++ {
-		// is it a digit?
-		if '0' <= decimal[i] && decimal[i] <= '9' {
+	for i := 0; i < len(abs); i++ {
+		// handle digits
+		if '0' <= abs[i] && abs[i] <= '9' {
 			before++
 			hasDigit = true
+			*buf = append(*buf, abs[i])
 			continue
 		}
-		// is it the first non-digit character
+
+		// handle the first non-digit character
 		if first == 0 {
-			switch decimal[i] {
+			// we never enter twice in this block
+			switch abs[i] {
 			case ',', '.', '\'':
-				first = rune(decimal[i])
+				first = rune(abs[i])
 				// is the rist separator a decimal separator necessarily?
 				if before == 0 || before > 3 {
 					point = first
 				}
+				buf = &b // we start the possible decimal part (if not we will copy it back to a)
 			case ' ':
 				if before > 3 {
-					return df, false
+					return decimal, df, false
 				}
-				first = ' '
-				group = ' '
+				first, group = ' ', ' '
 			case 0xC2:
-				if i+1 >= len(decimal) || decimal[i+1] != 0xB7 {
-					return df, false
+				if i+1 >= len(abs) || abs[i+1] != 0xB7 {
+					return decimal, df, false
 				}
 				i++
-				first = '·'
-				point = '·'
+				first, point = '·', '·'
+				buf = &b // we start the decimal part
 			default:
-				return df, false
+				return decimal, df, false
 			}
 			before = 0
 			continue
 		}
-		// are we after the decimal separator?
+
+		// no more separator is allowed after the decimal separator
 		if point != 0 {
-			return df, false
+			return decimal, df, false
 		}
-		// is it the next grouping separator?
-		if first == rune(decimal[i]) {
+
+		// handle the grouping separator
+		if first == rune(abs[i]) {
+			// grouping must match standard or non-standard rules (2 or 3 digits).
 			if (before != 2 && before != 3) || (mode > 0 && before != mode) {
-				return df, false
+				return decimal, df, false
 			}
-			group = first
-			mode = before
-			before = 0
+			group, mode, before = first, before, 0
+			// if we were hesitating between a grouping and a decimal separator
+			flushBtoA(&a, &b)
+			buf = &a
 			continue
 		}
-		// is it a midpoint?
-		if decimal[i] == 0xC2 && i+1 < len(decimal) && decimal[i+1] == 0xB7 {
+		// the new separator could be only a decimal separator
+		// so the previous one is necessarily a grouping separator
+		group = first
+
+		// handle the decimal separator
+		if abs[i] == 0xC2 && i+1 < len(abs) && abs[i+1] == 0xB7 {
 			i++
 			point = '·'
 		} else {
-			point = rune(decimal[i])
+			point = rune(abs[i])
 		}
-		group = first
-		// is it the decimal separator?
+		// check if the decimal separator is valid
 		if before != 3 || !isPossible(point, group) {
-			return df, false
+			return decimal, df, false
 		}
+
+		// handle ambiguity between grouping and decimal separator,
+		// if we have collected some digits in the decimal part
+		// transfer them to the integer part
+		flushBtoA(&a, &b)
+		// start collecting the decimal part
+		buf = &b
 		before = 0
 	}
-	// if the string has no digit
+
+	// At this point df is zero, {NoSeparator, NoSeparator, false}.
+	// We have to fill it with the detected values.
+
+	// handle strings with no digits
 	if !hasDigit {
-		return df, false
+		return decimal, df, false
 	}
-	// if no separator was found
+
+	// handle digits without any separator
 	if first == 0 {
-		df.Point = NoSeparator
-		df.Group = NoSeparator
 		df.Standard = true
-		return df, true
+		return T(compose(a, b)), df, true
 	}
-	// if we have a decimal separator
+
+	// handle digits with decimal separator
 	if point != 0 {
-		df.Point = point
-		if group == 0 {
-			df.Group = NoSeparator
-		} else {
-			df.Group = group
-		}
-		df.Standard = mode != 2
-		return df, true
+		df.Point, df.Group, df.Standard = point, group, mode != 2
+		return T(compose(a, b)), df, true
 	}
-	// if the only separator is a grouping separator
+
+	// handle digits only with grouping separator
 	if group != 0 {
 		if before != 3 {
-			return df, false
+			return decimal, df, false
 		}
-		df.Point = NoSeparator
-		df.Group = group
-		df.Standard = mode != 2
-		return df, true
+		df.Group, df.Standard = group, mode != 2
+		return T(compose(a, b)), df, true
 	}
-	// are we in the ambiguous case?
+
+	// handle digits with single unknown separator
 	if before == 3 {
-		return df, false
+		// we are in the ambiguous case (3 digits before the separator)
+		return decimal, df, false
 	}
 	// the only separator is necessarily a decimal separator
-	df.Point = first
-	df.Group = NoSeparator
-	df.Standard = true
-	return df, true
+	df.Point, df.Standard = first, true
+	return T(compose(a, b)), df, true
 }
 
-// Normalize returns the normalized decimal string.
-// The normalized string is the decimal string:
-//   - without leading or trailing spaces
-//   - with a leading '-' if the number is negative
-//   - with a decimal separator '.'
-//   - without a grouping separator
-//   - it is not starting with decimal separator : -.123 → -0.123
-//   - it is not ending with decimal separator : 123. → 123.
-//
-// If the input string is not a valid decimal string,
-// it returns the input string unchanged.
-func Normalize(decimal string) (normalized string) {
-	// get the sign and the absolute value
-	sign, abs := getSign(decimal)
-	// get the decimal format
-	df, ok := DetectFormat(abs)
-	if !ok {
-		return decimal
-	}
-	sb := strings.Builder{}
-	if sign == "-" {
-		sb.WriteByte('-')
-	}
-	first := true
-	hasDot := false
-	for _, c := range abs {
-		if c == df.Group {
-			continue
-		}
-		if c == df.Point {
-			if first {
-				sb.WriteByte('0')
-			}
-			sb.WriteByte('.')
-			hasDot = true
-			continue
-		}
-		// skip leading '0' if any
-		if first && c == '0' {
-			continue
-		}
-		first = false
-		sb.WriteRune(c)
-	}
-	normalized = sb.String()
-	n := len(normalized)
-	// trim trailing '0' from the decimal part
-	if hasDot {
-		for n > 0 && normalized[n-1] == '0' {
-			n--
-		}
-	}
-	// if the last character is the decimal separator remove it
-	if normalized[n-1] == '.' {
-		n--
-	}
-	return normalized[:n]
+// DetectFormat detects the decimal format of a string.
+// It returns the detected DecimalFormat and a boolean indicating success.
+// The boolean `ok` is false if the string does not contain a valid decimal format
+// or if the format is ambiguous.
+// If it is impossible to determine whether the grouping is standard or non-standard,
+// it defaults to standard.
+func DetectFormat[T bytestr](decimal T) (df DecimalFormat, ok bool) {
+	_, df, ok = detectAndNormalize(decimal)
+	return df, ok
 }
 
-// IsNormalized returns true if the decimal string is normalized.
-// A normalized decimal string is a string :
-//   - may start with a '-'
-//   - followed by a digit(s)
-//   - followed by a '.' and a digit(s)
-//   - can't start with '0' if the integer part is not 0
-//   - can't have trailing zeros after the '.'
-//   - can't have a trailing '.'
-func IsNormalized(decimal string) bool {
+// Normalize returns a normalized decimal string.
+// A normalized decimal string adheres to the following rules:
+//   - May start with a '-' (negative sign).
+//   - Is followed by one or more digits.
+//   - If a '.' is present, it is followed by one or more digits (e.g., "123." -> "123").
+//   - Cannot start with '0' unless the integer part is exactly 0 (e.g., "0123.4" -> "123.4").
+//   - Cannot have trailing zeros after the '.' (e.g., "123.000" -> "123").
+//   - Cannot have a trailing '.' (e.g., "123." -> "123").
+func Normalize[T bytestr](decimal T) (normalized T) {
+	normalized, _, _ = detectAndNormalize(decimal)
+	return normalized
+}
+
+// NormalizeCheck returns a normalized decimal string and a boolean.
+// The boolean `ok` is true if the input string was successfully normalized;
+// otherwise, it is false, indicating the input string is unchanged.
+func NormalizeCheck[T bytestr](decimal T) (normalized T, ok bool) {
+	normalized, _, ok = detectAndNormalize(decimal)
+	return normalized, ok
+}
+
+// IsNormalized checks if a decimal string is normalized.
+// A normalized decimal string adheres to the following rules:
+//   - May start with a '-' (negative sign).
+//   - Must be followed by one or more digits.
+//   - If a '.' is present, it must be followed by one or more digits.
+//   - Cannot start with '0' unless the integer part is exactly 0.
+//   - Cannot have trailing zeros after the '.' (e.g., "123.000" -> false).
+//   - Cannot have a trailing '.' (e.g., "123." -> false).
+//   - The string cannot be empty.
+func IsNormalized[T bytestr](decimal T) bool {
 	if len(decimal) == 0 {
 		return false
 	}
-	if decimal == "0" {
+	if len(decimal) == 1 && decimal[0] == '0' {
 		return true
 	}
 	var (
-		first     bool
-		after     bool
-		c         rune
-		expectDot bool
+		first     bool // whether we're processing the first character
+		after     bool // whether we're after the '.'
+		c         byte // current character
+		expectDot bool // whether we expect a '.' after a leading '0'
 	)
 	first = true
-	for _, c = range decimal {
+	for i := 0; i < len(decimal); i++ {
+		c = decimal[i]
 		// skip leading '-' if any
 		if first && c == '-' {
 			continue
 		}
 		if c == '.' {
-			// can't start with '.' or have multiple '.'
+			// '.' cannot be the first character or appear multiple times.
 			if first || after {
 				return false
 			}
-			// we are after the '.'
+			// we're now processing the decimal part (after the '.')
 			after = true
 			expectDot = false
 			continue
 		}
-		// if it is not a digit
+		// if we expect a '.' but encounter a digit, it's invalid
 		if c < '0' || c > '9' {
 			return false
 		}
-		// if it is a digit but we expect a '.' (after first '0')
+		// if we expect a '.' but encounter a digit, it's invalid
 		if expectDot {
 			return false
 		}
-		// if the integer part starts with '0'
+		// check if the integer part starts with '0'
 		if first {
 			expectDot = (c == '0')
 		}
 		first = false
 	}
-	// trailing '.' ?
-	if c == '.' {
+	// ensure the last character is not '.' or '0' (if we're after '.')
+	if c == '.' || (c == '0' && after) {
 		return false
 	}
-	// trailing zeros after the '.'
-	if c == '0' && after {
-		return false
-	}
-	// '-0' case ?
+	// special case for '-0'
 	if expectDot {
 		return false
 	}
 	return true
 }
 
-// Convert converts a decimal string to a formatted decimal string.
+// Convert converts a decimal string to a formatted decimal string using the specified DecimalFormat.
 // If the input string is not a valid decimal string, it returns "0" and false.
-// The input do not need to be normalized decimal string.
+// The input string does not need to be a normalized decimal string.
+// The output string is formatted based on the following rules:
+//   - Grouping separators are inserted every 3 or 2 digits (depending on `df.Standard`).
+//   - A custom decimal separator (`df.Point`) is used.
+//   - Negative numbers retain their '-' sign. If + is present, it is removed.
 func (df DecimalFormat) Convert(decimal string) (new string, ok bool) {
-	// try to normalize the decimal string
+	// attempt to normalize the decimal string
 	if !IsNormalized(decimal) {
 		decimal = Normalize(decimal)
+		// if normalization fails, return "0" and false
 		if !IsNormalized(decimal) {
 			return "0", false
 		}
 	}
-	var group int
-	if df.Standard {
-		group = 3
-	} else {
+	// determine the grouping size: 3 for standard formats, 2 for non-standard
+	group := 3
+	if !df.Standard {
 		group = 2
 	}
+
+	// use a strings.Builder for efficient string construction
 	sb := strings.Builder{}
+
+	// handle negative numbers by writing the '-' sign and removing it from the input
 	if decimal[0] == '-' {
 		sb.WriteByte('-')
 		decimal = decimal[1:]
 	}
+
+	// split the string into integer and fractional parts
 	parts := strings.Split(decimal, ".")
 	n := len(parts[0])
+
+	// calculate initial grouping positions
 	k, l := 0, (n-3)%group
 	if l == 0 {
 		l = group
 	}
+
+	// insert grouping separators for the integer part
 	for n > 3 {
 		sb.WriteString(parts[0][k:l])
 		sb.WriteRune(df.Group)
@@ -350,9 +440,13 @@ func (df DecimalFormat) Convert(decimal string) (new string, ok bool) {
 		n -= group
 	}
 	sb.WriteString(parts[0][k:])
+
+	// append the decimal separator and the fractional part if any
 	if len(parts) == 2 {
 		sb.WriteRune(df.Point)
 		sb.WriteString(parts[1])
 	}
+
+	// return the formatted string and true, indicating success
 	return sb.String(), true
 }

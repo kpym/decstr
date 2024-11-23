@@ -1,28 +1,82 @@
 # decstr
 
-A golang package to work with decimal strings. No external dependencies.
+`decstr` is a Golang package to handle decimal strings. It provides utilities to normalize, check, detect formats, and convert decimal strings, without relying on external dependencies.
+
+## Features
+
+- Normalize decimal strings:
+  - Removes grouping separators.
+  - Standardizes the decimal separator to `.` (dot).
+  - Removes leading zeros, trailing zeros, and trailing decimal separators for integers.
+  
+- Detect decimal format (grouping separator, decimal separator, and grouping style).
+- Convert decimal strings to a specified format.
 
 ## Functions
 
-- `Normalize` get a decimal string and return a normalized string:
-  - no grouping,
-  - decimal separator is `.` (dot),
-  - no leading zeros,
-  - no trailing zeros and no trailing decimal separator (for integers).
+All functions accept both `string` or `[]byte` as input and return results in the same type.
+In what follows, only "string" is used for simplicity.
 
-  If the string is not a valid decimal string, it returns it as is.
-- `IsNormalized` check if a decimal string is normalized.
-- `DetectFormat` get a decimal string and return the decimal format:
-  - decimal separator,
-  - grouping separator,
-  - standard grouping (by 3) or non standard grouping (3, then by 2).
+### `Normalize`
+Normalizes a decimal string:
+- No grouping separators.
+- Decimal separator is `.` (dot).
+- No leading or trailing zeros (and no trailing decimal for integers).
+  
+If the input string is not a valid decimal, it returns the string as-is.
+### `NormalizeCheck`
+Same as `Normalize`, but also returns a boolean indicating whether the string was normalized.
 
-  The only ambiguos decimal/integer is `##D<sep>DDD` (4.321 | 54.321 | 654.321).
-- `Convert` get a decimal string and convert it to the specified format.
+### `IsNormalized`
+Checks if the decimal string is normalized.
+
+### `DetectFormat`
+Detects the decimal format:
+- Returns the decimal separator.
+- Returns the grouping separator (if any).
+- Indicates whether the grouping is standard (3 digits per group) or non-standard (first 3 digits, then 2 per group).
+
+### `Convert`
+Converts a decimal string to the specified format.
+
+## Example
+
+```go
+package main
+
+import (
+  "fmt"
+  "github.com/kpym/decstr"
+)
+
+func main() {
+    decimal := "1'234'567,89"
+
+	// Normalize example
+	normalized := decstr.Normalize(decimal)
+	fmt.Println("Normalized:", normalized) // 1234567.89
+
+	// Detect format example
+	format, ok := decstr.DetectFormat(decimal)
+	fmt.Println("Detected format:", format, "ok:", ok) // Detected format: {`,`, `'`, standard} ok: true
+	// Convert example
+	df := decstr.DecimalFormat{Point: '.', Group: ' ', Standard: false}
+	converted, ok := df.Convert(decimal)
+	fmt.Println("Converted:", converted, "ok:", ok) // Converted: 12 34 567.89 ok: true
+}
+```
+
+## Documentation
+
+The package documentation is available at [pkg.go.dev](https://pkg.go.dev/github.com/kpym/decstr).
+
+## LICENSE
+
+This package is released under the [MIT License](LICENSE).
 
 ## Decimal Format
 
-Possible decimal writings [Wikipedia](https://en.wikipedia.org/wiki/Decimal_separator).
+Possible decimal writings from [Wikipedia](https://en.wikipedia.org/wiki/Decimal_separator):
 
 - standard grouping (by 3)
   - `1,234,567.89` : Australia, Cambodia, Canada (English-speaking; unofficial), China, Cyprus (currency numbers), Hong Kong, Iran, Ireland, Israel, Japan, Korea, Macau (in Chinese and English text), Malaysia, Mexico, Namibia, New Zealand, Pakistan, Peru (currency numbers), Philippines, Singapore, South Africa (English-speaking; unofficial), Taiwan, Thailand, United Kingdom and other Commonwealth states except Mozambique, United States.

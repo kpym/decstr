@@ -25,7 +25,7 @@ func TestDecimalFormatString(t *testing.T) {
 }
 
 func TestGetSign(t *testing.T) {
-	tests := []struct {
+	testStrings := []struct {
 		decimal string
 		sign    string
 		abs     string
@@ -41,9 +41,32 @@ func TestGetSign(t *testing.T) {
 		{"  -   123  ", "-", "123"},
 	}
 
-	for _, test := range tests {
+	testBytes := []struct {
+		decimal []byte
+		sign    []byte
+		abs     []byte
+	}{
+		{[]byte(""), []byte(""), []byte("")},
+		{[]byte("  "), []byte(""), []byte("")},
+		{[]byte("0"), []byte(""), []byte("0")},
+		{[]byte(" 0"), []byte(""), []byte("0")},
+		{[]byte("0 "), []byte(""), []byte("0")},
+		{[]byte("+1"), []byte(""), []byte("1")},
+		{[]byte("+ 123"), []byte(""), []byte("123")},
+		{[]byte("-1"), []byte("-"), []byte("1")},
+		{[]byte("  -   123  "), []byte("-"), []byte("123")},
+	}
+
+	for _, test := range testStrings {
 		sign, abs := getSign(test.decimal)
 		if sign != test.sign || abs != test.abs {
+			t.Errorf("GetSign(%q) = (%q, %q), want (%q, %q)", test.decimal, sign, abs, test.sign, test.abs)
+		}
+	}
+
+	for _, test := range testBytes {
+		sign, abs := getSign(test.decimal)
+		if string(sign) != string(test.sign) || string(abs) != string(test.abs) {
 			t.Errorf("GetSign(%q) = (%q, %q), want (%q, %q)", test.decimal, sign, abs, test.sign, test.abs)
 		}
 	}
@@ -180,12 +203,88 @@ func TestNormalize(t *testing.T) {
 	}
 }
 
+// BenchmarkNormalize compare Normalize and AutoNormalize functions
+func BenchmarkNormalizeString(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		Normalize("1 234,50")
+	}
+}
+
+func BenchmarkNormalizeSlice(b *testing.B) {
+	buf := []byte("1 234,50")
+	for i := 0; i < b.N; i++ {
+		Normalize(string(buf))
+	}
+}
+
 func ExampleNormalize() {
 	fmt.Println(Normalize(" - 1 234,50 "))
 	fmt.Println(Normalize("12 345."))
 	// Output:
 	// -1234.5
 	// 12345
+}
+
+func TestNormalizeCheck(t *testing.T) {
+	data := []struct {
+		decimal string
+		want    string
+		ok      bool
+	}{
+		{"123", "123", true},
+		{"1 234", "1234", true},
+		{"1·234", "1.234", true},
+		{"1 234.56", "1234.56", true},
+		{"1,234.56", "1234.56", true},
+		{"1'234.56", "1234.56", true},
+		{"1 234,56", "1234.56", true},
+		{"1.234,56", "1234.56", true},
+		{"1'234,56", "1234.56", true},
+		{"1.234'56", "1234.56", true},
+		{"1,234·56", "1234.56", true},
+		{"1'234'567", "1234567", true},
+		{"1'34'567", "134567", true},
+		{"1 234 567", "1234567", true},
+		{"1 34 567", "134567", true},
+		{"1 234 567.8", "1234567.8", true},
+		{"1 34 567.8", "134567.8", true},
+		{".12", "0.12", true},
+		{"12.", "12", true},
+		{"012.", "12", true},
+		{"012.3", "12.3", true},
+		{"12.0", "12", true},
+		{"12.30", "12.3", true},
+		{"1,234", "1,234", false},           // ambiguous
+		{"1.234", "1.234", false},           // ambiguous
+		{"1'234", "1'234", false},           // ambiguous
+		{"", "", false},                     // not a decimal
+		{"  ", "  ", false},                 // not a decimal
+		{" test ", " test ", false},         // not a decimal
+		{",", ",", false},                   // not a decimal
+		{"-,", "-,", false},                 // not a decimal
+		{".", ".", false},                   // not a decimal
+		{"-.", "-.", false},                 // not a decimal
+		{"+.", "+.", false},                 // not a decimal
+		{" - .", " - .", false},             // not a decimal
+		{"1·234.56", "1·234.56", false},     // not a decimal
+		{"1·234,56", "1·234,56", false},     // not a decimal
+		{"1·234'56", "1·234'56", false},     // not a decimal
+		{"1,234'56", "1,234'56", false},     // not a decimal
+		{"1 234'56", "1 234'56", false},     // not a decimal
+		{"1 234·56", "1 234·56", false},     // not a decimal
+		{"1'234·56", "1'234·56", false},     // not a decimal
+		{"1.234·56", "1.234·56", false},     // not a decimal
+		{"1'234'56", "1'234'56", false},     // not a decimal
+		{"1 234 56", "1 234 56", false},     // not a decimal
+		{"12.345 678", "12.345 678", false}, // not a decimal
+	}
+
+	for _, test := range data {
+		got, ok := NormalizeCheck(test.decimal)
+		if got != test.want || ok != test.ok {
+			t.Errorf("NormalizeCheck(%q) = (%q, %v), want (%q, %v)", test.decimal, got, ok, test.want, test.ok)
+		}
+	}
 }
 
 func TestIsNormalized(t *testing.T) {
@@ -278,4 +377,26 @@ func ExampleDecimalFormat_Convert() {
 	}
 	fmt.Println(new)
 	// Output: 123 456 789,123
+}
+
+// Example demonstrates general usage of the decstr package, including
+// normalization, format detection, and conversion of decimal strings.
+func Example() {
+	decimal := "1'234'567,89"
+
+	// Normalize example
+	normalized := Normalize(decimal)
+	fmt.Println("Normalized:", normalized)
+
+	// Detect format example
+	format, ok := DetectFormat(decimal)
+	fmt.Println("Detected format:", format, "ok:", ok)
+	// Convert example
+	df := DecimalFormat{Point: '.', Group: ' ', Standard: false}
+	converted, ok := df.Convert(decimal)
+	fmt.Println("Converted:", converted, "ok:", ok)
+	// Output:
+	// Normalized: 1234567.89
+	// Detected format: {`,`, `'`, standard} ok: true
+	// Converted: 12 34 567.89 ok: true
 }
