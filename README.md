@@ -12,6 +12,34 @@
 - Detect decimal format (grouping separator, decimal separator, and grouping style).
 - Convert decimal strings to a specified format.
 
+## Example
+
+```go
+package main
+
+import (
+  "fmt"
+  "github.com/kpym/decstr"
+)
+
+func main() {
+    decimal := "1'234'567,89"
+
+    // Normalize example
+    normalized := decstr.Normalize(decimal)
+    fmt.Println("Normalized:", normalized) // 1234567.89
+
+    // Detect format example
+    format, ok := decstr.DetectFormat(decimal)
+    fmt.Println("Detected format:", format, "ok:", ok) // Detected format: {`,`, `'`, standard} ok: true
+    
+	// Convert example
+    df := decstr.DecimalFormat{Point: '.', Group: ' ', Standard: false}
+    converted, ok := df.Convert(decimal)
+    fmt.Println("Converted:", converted, "ok:", ok) // Converted: 12 34 567.89 ok: true
+}
+```
+
 ## Functions
 
 All functions accept both `string` or `[]byte` as input and return results in the same type.
@@ -38,33 +66,6 @@ Detects the decimal format:
 
 ### `Convert`
 Converts a decimal string to the specified format.
-
-## Example
-
-```go
-package main
-
-import (
-  "fmt"
-  "github.com/kpym/decstr"
-)
-
-func main() {
-    decimal := "1'234'567,89"
-
-	// Normalize example
-	normalized := decstr.Normalize(decimal)
-	fmt.Println("Normalized:", normalized) // 1234567.89
-
-	// Detect format example
-	format, ok := decstr.DetectFormat(decimal)
-	fmt.Println("Detected format:", format, "ok:", ok) // Detected format: {`,`, `'`, standard} ok: true
-	// Convert example
-	df := decstr.DecimalFormat{Point: '.', Group: ' ', Standard: false}
-	converted, ok := df.Convert(decimal)
-	fmt.Println("Converted:", converted, "ok:", ok) // Converted: 12 34 567.89 ok: true
-}
-```
 
 ## Documentation
 
