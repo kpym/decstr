@@ -144,6 +144,7 @@ func TestNormalize(t *testing.T) {
 	}{
 		{"123", "123"},
 		{"1 234", "1234"},
+		{"1\u00A0234", "1234"},
 		{"1·234", "1.234"},
 		{"1 234.56", "1234.56"},
 		{"1,234.56", "1234.56"},
@@ -233,6 +234,7 @@ func TestNormalizeCheck(t *testing.T) {
 	}{
 		{"123", "123", true},
 		{"1 234", "1234", true},
+		{"1\u00a0234", "1234", true},
 		{"1·234", "1.234", true},
 		{"1 234.56", "1234.56", true},
 		{"1,234.56", "1234.56", true},
@@ -344,6 +346,7 @@ func TestConvert(t *testing.T) {
 	}{
 		{DecimalFormat{Point: '.', Group: NoSeparator, Standard: true}, "123", "123", true},
 		{DecimalFormat{Point: '.', Group: ' ', Standard: true}, "+ 1234", "1 234", true},
+		{DecimalFormat{Point: '.', Group: ' ', Standard: true}, "+ 1\u00a0234", "1 234", true},
 		{DecimalFormat{Point: '.', Group: ' ', Standard: true}, "123456789", "123 456 789", true},
 		{DecimalFormat{Point: '.', Group: ' ', Standard: false}, "123456789", "12 34 56 789", true},
 		{DecimalFormat{Point: '.', Group: ' ', Standard: false}, "-23456789", "-2 34 56 789", true},

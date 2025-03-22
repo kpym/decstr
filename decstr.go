@@ -38,10 +38,11 @@ func (df DecimalFormat) String() string {
 }
 
 // possibleGrouping maps each decimal separator to its valid grouping separators.
-// For example, ',' as a decimal separator may use ' ', '.', or '\” as grouping separators.
+// For example, ',' as a decimal separator may use '\u00A0', ' ', '.', or '\” as grouping separators.
+// The character \u00A0 is a non-breaking space.
 var possibleGrouping = map[rune][]rune{
-	',':  {' ', '.', '\''},
-	'.':  {' ', ',', '\''},
+	',':  {' ', '\u00A0', '.', '\''},
+	'.':  {' ', '\u00A0', ',', '\''},
 	'·':  {','},
 	'\'': {'.'},
 }
@@ -189,7 +190,7 @@ func detectAndNormalize[T bytestr](decimal T) (normalized T, df DecimalFormat, o
 			switch abs[i] {
 			case ',', '.', '\'':
 				first = rune(abs[i])
-				// is the rist separator a decimal separator necessarily?
+				// is the first separator a decimal separator?
 				if before == 0 || before > 3 {
 					point = first
 				}
@@ -200,13 +201,28 @@ func detectAndNormalize[T bytestr](decimal T) (normalized T, df DecimalFormat, o
 				}
 				first, group = ' ', ' '
 			case 0xC2:
-				if i+1 >= len(abs) || abs[i+1] != 0xB7 {
+				if i+1 >= len(abs) {
+					// not a decimal number
 					return decimal, df, false
 				}
-				i++
-				first, point = '·', '·'
-				buf = &b // we start the decimal part
+				switch abs[i+1] {
+				case 0xB7: // center dot
+					i++
+					first, point = '·', '·'
+					buf = &b // we start the decimal part
+				case 0xA0: // non-breaking space
+					if before > 3 {
+						// not a decimal number
+						return decimal, df, false
+					}
+					i++
+					first, group = '\u00A0', '\u00A0'
+				default:
+					// not a decimal number
+					return decimal, df, false
+				}
 			default:
+				// not a decimal number
 				return decimal, df, false
 			}
 			before = 0
