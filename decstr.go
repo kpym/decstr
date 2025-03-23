@@ -37,26 +37,40 @@ func (df DecimalFormat) String() string {
 	return "{`" + sep(df.Point) + "`, `" + sep(df.Group) + "`, " + std + "}"
 }
 
-// possibleGrouping maps each decimal separator to its valid grouping separators.
-// For example, ',' as a decimal separator may use '\u00A0', ' ', '.', or '\” as grouping separators.
-// The character \u00A0 is a non-breaking space.
-var possibleGrouping = map[rune][]rune{
-	',':  {' ', '\u00A0', '.', '\''},
-	'.':  {' ', '\u00A0', ',', '\''},
-	'·':  {','},
-	'\'': {'.'},
-}
-
 // isPossible checks if the given grouping separator is valid for the specified decimal separator.
+// Following https://en.wikipedia.org/wiki/Decimal_separator
+// 1,234,567.89
+// Australia,[51][52] Cambodia, Canada (English-speaking; unofficial), China,[53] Cyprus (currency numbers), Hong Kong, Iran, Ireland, Israel, Japan, Korea, Macau (in Chinese and English text), Malaysia, Mexico, Namibia, New Zealand, Pakistan, Peru (currency numbers), Philippines, Singapore, South Africa (English-speaking; unofficial), Taiwan, Thailand, United Kingdom and other Commonwealth states except Mozambique, United States.
+// 1 234 567.89
+// Canada (English-speaking; official), China,[53] Estonia (currency numbers), Hong Kong (in education), Mexico, Namibia, South Africa (English-speaking; unofficial), Sri Lanka, Switzerland (in federal texts for currency numbers only[54]), United Kingdom (in education), United States (in education)[citation needed]. SI style (English version) but SI doesn't include currency.
+// 1_234_567.89
+// Ada, C#, D, Eiffel, Fortran 90, Go, Haskell, Java, JavaScript, Julia, Kotlin , Perl, Python, Ruby, Rust, Swift... programming languages.
+// 1 234 567,89
+// Albania, Belgium (French), Brazil, Bulgaria, Canada (French-speaking), Costa Rica, Croatia, Czech Republic, Estonia, Finland,[55] France, Hungary, Italy (in education), Latin America, Latin Europe, Latvia, Lithuania, Macau (in Portuguese text), Mozambique, Norway, Peru, Poland, Portugal, Russia, Serbia (informal), Slovakia, Slovenia, South Africa (official[56]), Spain (official use since 2010, according to the RAE and CSIC), Sweden, Switzerland (in federal texts, except currency numbers[54]), Ukraine, Vietnam (in education). SI style (French version) but SI doesn't include currency.
+// 1.234.567,89
+// Austria, Belgium (Dutch), Bosnia and Herzegovina, Brazil (informal and in technology), Chile, Colombia, Croatia (in bookkeeping and technology),[57] Denmark, Germany, Greece, Indonesia, Italy, Latin America (informal), Netherlands, Romania, Slovenia, Serbia, Spain (used until 2010, inadvisable use according to the RAE and CSIC),[d][59] Turkey, Uruguay, Vietnam.
+// 1,234,567·89
+// Malaysia, Malta, Philippines (uncommon today), Singapore, Taiwan, United Kingdom (older, typically handwritten; in education)
+// 12,34,567.89
+// 12 34 567.89
+// Bangladesh, India, Nepal, Pakistan (see Indian numbering system).
+// 1'234'567.89
+// Switzerland (computing), Liechtenstein.
+// C++14, Rebol, and Red programming languages.
+// 1'234'567,89
+// Switzerland (handwriting), Italy (handwriting).
+// 1.234.567'89
+// Spain (handwriting, used until 1980s, inadvisable use according to the RAE and CSIC[citation needed]).
 func isPossible(point, group rune) bool {
-	groups, ok := possibleGrouping[point]
-	if !ok {
-		return false
-	}
-	for _, g := range groups {
-		if g == group {
-			return true
-		}
+	switch point {
+	case '.':
+		return group == ' ' || group == '\u00A0' || group == ',' || group == '\'' || group == '_'
+	case ',':
+		return group == ' ' || group == '\u00A0' || group == '.' || group == '\''
+	case '·': // Malaysia, Malta, Philippines (uncommon today), Singapore, Taiwan
+		return group == ','
+	case '\'':
+		return group == '.'
 	}
 	return false
 }
@@ -163,7 +177,8 @@ func compose(a, b []byte) []byte {
 func detectAndNormalize[T bytestr](decimal T) (normalized T, df DecimalFormat, ok bool) {
 	// temporary variables
 	var (
-		first        rune // first separator found
+		firstsep     rune // first separator found
+		newsep       rune // new separator found
 		point, group rune // decimal and grouping separators
 		before       int  // number of digits before the separator
 		mode         int  // 0: unknown, 2: non-standard grouping, 3: standard grouping
@@ -185,21 +200,21 @@ func detectAndNormalize[T bytestr](decimal T) (normalized T, df DecimalFormat, o
 		}
 
 		// handle the first non-digit character
-		if first == 0 {
+		if firstsep == 0 {
 			// we never enter twice in this block
 			switch abs[i] {
 			case ',', '.', '\'':
-				first = rune(abs[i])
+				firstsep = rune(abs[i])
 				// is the first separator a decimal separator?
 				if before == 0 || before > 3 {
-					point = first
+					point = firstsep
 				}
 				buf = &b // we start the possible decimal part (if not we will copy it back to a)
-			case ' ':
+			case ' ', '_':
 				if before > 3 {
 					return decimal, df, false
 				}
-				first, group = ' ', ' '
+				firstsep, group = rune(abs[i]), rune(abs[i])
 			case 0xC2:
 				if i+1 >= len(abs) {
 					// not a decimal number
@@ -208,7 +223,7 @@ func detectAndNormalize[T bytestr](decimal T) (normalized T, df DecimalFormat, o
 				switch abs[i+1] {
 				case 0xB7: // center dot
 					i++
-					first, point = '·', '·'
+					firstsep, point = '·', '·'
 					buf = &b // we start the decimal part
 				case 0xA0: // non-breaking space
 					if before > 3 {
@@ -216,7 +231,7 @@ func detectAndNormalize[T bytestr](decimal T) (normalized T, df DecimalFormat, o
 						return decimal, df, false
 					}
 					i++
-					first, group = '\u00A0', '\u00A0'
+					firstsep, group = '\u00A0', '\u00A0'
 				default:
 					// not a decimal number
 					return decimal, df, false
@@ -234,13 +249,28 @@ func detectAndNormalize[T bytestr](decimal T) (normalized T, df DecimalFormat, o
 			return decimal, df, false
 		}
 
+		if abs[i] == 0xC2 && i+1 < len(abs) {
+			switch abs[i+1] {
+			case 0xB7: // center dot
+				newsep = '·'
+			case 0xA0: // non-breaking space
+				newsep = '\u00A0'
+			default:
+				// not a decimal number
+				return decimal, df, false
+			}
+			i++
+		} else {
+			newsep = rune(abs[i])
+		}
+
 		// handle the grouping separator
-		if first == rune(abs[i]) {
+		if firstsep == newsep {
 			// grouping must match standard or non-standard rules (2 or 3 digits).
 			if (before != 2 && before != 3) || (mode > 0 && before != mode) {
 				return decimal, df, false
 			}
-			group, mode, before = first, before, 0
+			group, mode, before = firstsep, before, 0
 			// if we were hesitating between a grouping and a decimal separator
 			flushBtoA(&a, &b)
 			buf = &a
@@ -248,15 +278,8 @@ func detectAndNormalize[T bytestr](decimal T) (normalized T, df DecimalFormat, o
 		}
 		// the new separator could be only a decimal separator
 		// so the previous one is necessarily a grouping separator
-		group = first
-
-		// handle the decimal separator
-		if abs[i] == 0xC2 && i+1 < len(abs) && abs[i+1] == 0xB7 {
-			i++
-			point = '·'
-		} else {
-			point = rune(abs[i])
-		}
+		group = firstsep
+		point = newsep
 		// check if the decimal separator is valid
 		if before != 3 || !isPossible(point, group) {
 			return decimal, df, false
@@ -280,7 +303,7 @@ func detectAndNormalize[T bytestr](decimal T) (normalized T, df DecimalFormat, o
 	}
 
 	// handle digits without any separator
-	if first == 0 {
+	if firstsep == 0 {
 		df.Standard = true
 		return T(compose(a, b)), df, true
 	}
@@ -306,7 +329,7 @@ func detectAndNormalize[T bytestr](decimal T) (normalized T, df DecimalFormat, o
 		return decimal, df, false
 	}
 	// the only separator is necessarily a decimal separator
-	df.Point, df.Standard = first, true
+	df.Point, df.Standard = firstsep, true
 	return T(compose(a, b)), df, true
 }
 

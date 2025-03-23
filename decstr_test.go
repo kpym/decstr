@@ -89,6 +89,7 @@ func TestDetectFormat(t *testing.T) {
 		{"1 234.56", DecimalFormat{Point: '.', Group: ' ', Standard: true}, true},
 		{"1,234.56", DecimalFormat{Point: '.', Group: ',', Standard: true}, true},
 		{"1'234.56", DecimalFormat{Point: '.', Group: '\'', Standard: true}, true},
+		{"1_234.56", DecimalFormat{Point: '.', Group: '_', Standard: true}, true},
 		{"1·234.56", DecimalFormat{}, false},
 		{"1 234,56", DecimalFormat{Point: ',', Group: ' ', Standard: true}, true},
 		{"1.234,56", DecimalFormat{Point: ',', Group: '.', Standard: true}, true},
@@ -149,6 +150,7 @@ func TestNormalize(t *testing.T) {
 		{"1 234.56", "1234.56"},
 		{"1,234.56", "1234.56"},
 		{"1'234.56", "1234.56"},
+		{"1_234.56", "1234.56"},
 		{"1 234,56", "1234.56"},
 		{"1.234,56", "1234.56"},
 		{"1'234,56", "1234.56"},
@@ -157,6 +159,7 @@ func TestNormalize(t *testing.T) {
 		{"1'234'567", "1234567"},
 		{"1'34'567", "134567"},
 		{"1 234 567", "1234567"},
+		{"1_234_567", "1234567"},
 		{"1 34 567", "134567"},
 		{"1 234 567.8", "1234567.8"},
 		{"1 34 567.8", "134567.8"},
@@ -239,6 +242,7 @@ func TestNormalizeCheck(t *testing.T) {
 		{"1 234.56", "1234.56", true},
 		{"1,234.56", "1234.56", true},
 		{"1'234.56", "1234.56", true},
+		{"1_234.56", "1234.56", true},
 		{"1 234,56", "1234.56", true},
 		{"1.234,56", "1234.56", true},
 		{"1'234,56", "1234.56", true},
@@ -247,6 +251,8 @@ func TestNormalizeCheck(t *testing.T) {
 		{"1'234'567", "1234567", true},
 		{"1'34'567", "134567", true},
 		{"1 234 567", "1234567", true},
+		{"1\u00a0234\u00a0567", "1234567", true},
+		{"1_234_567", "1234567", true},
 		{"1 34 567", "134567", true},
 		{"1 234 567.8", "1234567.8", true},
 		{"1 34 567.8", "134567.8", true},
@@ -268,6 +274,7 @@ func TestNormalizeCheck(t *testing.T) {
 		{"-.", "-.", false},                 // not a decimal
 		{"+.", "+.", false},                 // not a decimal
 		{" - .", " - .", false},             // not a decimal
+		{"1*23456", "1*23456", false},       // not a decimal
 		{"1·234.56", "1·234.56", false},     // not a decimal
 		{"1·234,56", "1·234,56", false},     // not a decimal
 		{"1·234'56", "1·234'56", false},     // not a decimal
@@ -279,6 +286,7 @@ func TestNormalizeCheck(t *testing.T) {
 		{"1'234'56", "1'234'56", false},     // not a decimal
 		{"1 234 56", "1 234 56", false},     // not a decimal
 		{"12.345 678", "12.345 678", false}, // not a decimal
+		{"12·345·678", "12·345·678", false}, // not a decimal
 	}
 
 	for _, test := range data {
